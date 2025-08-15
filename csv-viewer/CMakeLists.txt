@@ -49,6 +49,7 @@ else()
     endif()
 endif()
 
+# 链接Qt库
 target_link_libraries(csv-viewer PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
 
 set_target_properties(csv-viewer PROPERTIES

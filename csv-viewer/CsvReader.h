@@ -16,8 +16,21 @@ class CsvReader : public QObject
 public:
     explicit CsvReader(QObject *parent = nullptr);
     
+    // 支持的文件编码枚举
+    enum Encoding {
+        UTF8,    // 默认编码
+        GBK,     // 中文GBK编码
+        AutoDetect  // 自动检测编码
+    };
+    
     // 读取CSV文件
     bool loadFile(const QString &filePath);
+    
+    // 设置文件编码
+    void setEncoding(Encoding encoding);
+    
+    // 获取当前设置的编码
+    Encoding getEncoding() const;
     
     // 获取表头
     QStringList getHeaders() const;
@@ -42,6 +55,7 @@ private:
     QStringList m_headers;
     QList<QStringList> m_dataRows;
     QString m_lastError;
+    Encoding m_encoding; // 当前设置的编码
     
 
 };

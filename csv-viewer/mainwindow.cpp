@@ -15,6 +15,7 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
     , m_tableModel(new TableModel(this))
     , m_csvReader(new CsvReader(this))
+    , m_currentFilePath(QString())
 {
     ui->setupUi(this);
     
@@ -40,8 +41,16 @@ MainWindow::MainWindow(QWidget *parent)
     ui->tableView->setAttribute(Qt::WA_OpaquePaintEvent);
     ui->tableView->viewport()->setAttribute(Qt::WA_OpaquePaintEvent);
     
+    // 设置表格字体为支持中文的字体
+    QFont font = ui->tableView->font();
+    font.setFamily(QStringLiteral("SimHei")); // 黑体
+    ui->tableView->setFont(font);
+    
     // 连接菜单项到打开文件槽函数
     connect(ui->actionOpen, &QAction::triggered, this, &MainWindow::openFile);
+    
+    // 创建编码选择菜单
+    createEncodingMenu();
 }
 
 MainWindow::~MainWindow()
@@ -56,6 +65,60 @@ void MainWindow::openFile()
     
     if (!fileName.isEmpty()) {
         loadCsvFile(fileName);
+    }
+}
+
+void MainWindow::createEncodingMenu()
+{
+    // 创建编码菜单
+    QMenu *encodingMenu = new QMenu(tr("编码"), this);
+    ui->menubar->addMenu(encodingMenu);
+    
+    // 创建编码动作组
+    QActionGroup *encodingGroup = new QActionGroup(this);
+    encodingGroup->setExclusive(true);
+    
+    // 添加UTF-8编码选项
+    QAction *utf8Action = encodingMenu->addAction(tr("UTF-8"));
+    utf8Action->setCheckable(true);
+    utf8Action->setChecked(true); // 默认选中UTF-8
+    encodingGroup->addAction(utf8Action);
+    
+    // 添加GBK编码选项
+    QAction *gbkAction = encodingMenu->addAction(tr("GBK"));
+    gbkAction->setCheckable(true);
+    encodingGroup->addAction(gbkAction);
+    
+    // 添加自动检测编码选项
+    QAction *autoDetectAction = encodingMenu->addAction(tr("自动检测"));
+    autoDetectAction->setCheckable(true);
+    encodingGroup->addAction(autoDetectAction);
+    
+    // 连接编码选择信号
+    connect(utf8Action, &QAction::triggered, this, [this]() {
+        m_csvReader->setEncoding(CsvReader::UTF8);
+        qDebug() << "Encoding set to UTF-8";
+        reloadCurrentFileIfNeeded();
+    });
+    
+    connect(gbkAction, &QAction::triggered, this, [this]() {
+        m_csvReader->setEncoding(CsvReader::GBK);
+        qDebug() << "Encoding set to GBK";
+        reloadCurrentFileIfNeeded();
+    });
+    
+    connect(autoDetectAction, &QAction::triggered, this, [this]() {
+        m_csvReader->setEncoding(CsvReader::AutoDetect);
+        qDebug() << "Encoding set to AutoDetect";
+        reloadCurrentFileIfNeeded();
+    });
+}
+
+void MainWindow::reloadCurrentFileIfNeeded()
+{
+    // 如果当前已经打开了文件，则重新加载
+    if (!m_currentFilePath.isEmpty()) {
+        loadCsvFile(m_currentFilePath);
     }
 }
 
@@ -83,6 +146,9 @@ void MainWindow::loadCsvFile(const QString &filePath)
     // 获取绝对路径
     QString absolutePath = fileInfo.absoluteFilePath();
     qDebug() << "Absolute file path:" << absolutePath;
+    
+    // 保存当前文件路径，用于可能的重新加载
+    m_currentFilePath = absolutePath;
     
     // 重置当前已加载行数
     m_currentLoadedRows = 0;
