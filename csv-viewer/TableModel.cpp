@@ -1,4 +1,5 @@
 #include "TableModel.h"
+#include <QBrush>
 
 TableModel::TableModel(QObject *parent)
     : QAbstractTableModel(parent)
@@ -31,6 +32,14 @@ QVariant TableModel::data(const QModelIndex &index, int role) const
             return m_dataRows[index.row()][index.column()];
         }
     }
+    // 设置单元格背景色为白色，确保所有单元格都能正常显示
+    else if (role == Qt::BackgroundRole) {
+        return QBrush(Qt::white);
+    }
+    // 设置单元格文本颜色为黑色
+    else if (role == Qt::ForegroundRole) {
+        return QBrush(Qt::black);
+    }
 
     return QVariant();
 }
@@ -57,6 +66,17 @@ void TableModel::addRow(const QStringList &row)
 {
     beginInsertRows(QModelIndex(), m_dataRows.size(), m_dataRows.size());
     m_dataRows.append(row);
+    endInsertRows();
+}
+
+// 批量添加数据行 - 优化性能
+void TableModel::addRows(const QList<QStringList> &rows)
+{
+    if (rows.isEmpty())
+        return;
+        
+    beginInsertRows(QModelIndex(), m_dataRows.size(), m_dataRows.size() + rows.size() - 1);
+    m_dataRows.append(rows);
     endInsertRows();
 }
 

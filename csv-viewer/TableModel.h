@@ -22,6 +22,7 @@ public:
     // 设置数据
     void setHeaders(const QStringList &headers);
     void addRow(const QStringList &row);
+    void addRows(const QList<QStringList> &rows); // 批量添加数据行，优化性能
     void clear();
 
 private:

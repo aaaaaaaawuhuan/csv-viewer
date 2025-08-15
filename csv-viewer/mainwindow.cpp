@@ -7,6 +7,8 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QDebug>
+#include <QElapsedTimer>
+#include <QScrollBar>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -18,6 +20,25 @@ MainWindow::MainWindow(QWidget *parent)
     
     // 设置表格模型
     ui->tableView->setModel(m_tableModel);
+    
+    // 连接表格视图的垂直滚动条信号，实现滚动到底部时加载更多数据
+    connect(ui->tableView->verticalScrollBar(), &QScrollBar::valueChanged, this, [this](int value) {
+        QScrollBar *scrollBar = ui->tableView->verticalScrollBar();
+        if (scrollBar && scrollBar->value() == scrollBar->maximum()) {
+            // 当滚动到最底部时，加载更多数据
+            loadMoreRows();
+        }
+    });
+    
+    // 表格视图性能优化设置
+    ui->tableView->setSortingEnabled(false); // 禁用排序，需要时再启用
+    ui->tableView->setSelectionMode(QAbstractItemView::ExtendedSelection); // 设置选择模式
+    ui->tableView->setEditTriggers(QAbstractItemView::NoEditTriggers); // 禁用编辑
+    ui->tableView->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel); // 像素滚动
+    ui->tableView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel); // 像素滚动
+    ui->tableView->setAttribute(Qt::WA_AlwaysShowToolTips);
+    ui->tableView->setAttribute(Qt::WA_OpaquePaintEvent);
+    ui->tableView->viewport()->setAttribute(Qt::WA_OpaquePaintEvent);
     
     // 连接菜单项到打开文件槽函数
     connect(ui->actionOpen, &QAction::triggered, this, &MainWindow::openFile);
@@ -63,9 +84,12 @@ void MainWindow::loadCsvFile(const QString &filePath)
     QString absolutePath = fileInfo.absoluteFilePath();
     qDebug() << "Absolute file path:" << absolutePath;
     
+    // 重置当前已加载行数
+    m_currentLoadedRows = 0;
+    
     // 尝试加载文件
     if (m_csvReader->loadFile(absolutePath)) {
-        displayCsvData();
+        displayCsvData(false); // 默认不加载全部数据
         setWindowTitle(QString("CSV Viewer - %1").arg(fileInfo.fileName()));
     } else {
         QString error = QString("Failed to load file: %1\nError: %2")
@@ -76,19 +100,73 @@ void MainWindow::loadCsvFile(const QString &filePath)
     }
 }
 
-void MainWindow::displayCsvData()
+void MainWindow::displayCsvData(bool loadAll)
 {
+    // 计时：整个UI显示过程
+    QElapsedTimer uiDisplayTimer;
+    uiDisplayTimer.start();
+    
     // 清空现有数据
     m_tableModel->clear();
+    m_currentLoadedRows = 0;
     
     // 设置表头
     m_tableModel->setHeaders(m_csvReader->getHeaders());
     
+    // 获取要加载的行数
+    int totalRows = m_csvReader->getRowCount();
+    int rowsToLoad = loadAll ? totalRows : qMin(DEFAULT_ROWS_LIMIT, totalRows);
+    
     // 添加数据行
-    for (int i = 0; i < m_csvReader->getRowCount(); ++i) {
-        m_tableModel->addRow(m_csvReader->getRow(i));
+    if (rowsToLoad > 0) {
+        QList<QStringList> rows = m_csvReader->getRowsRange(0, rowsToLoad);
+        m_tableModel->addRows(rows);
+        m_currentLoadedRows = rowsToLoad;
     }
     
-    // 调整列宽
-    ui->tableView->resizeColumnsToContents();
+    // 优化列宽调整：大幅减少需要调整的列数，提高性能
+    int columnCount = m_csvReader->getHeaders().size();
+    int columnsToResize = qMin(columnCount, 10); // 只调整前10列，显著提高性能
+    for (int i = 0; i < columnsToResize; ++i) {
+        ui->tableView->resizeColumnToContents(i);
+    }
+    
+    // 对于剩余的列，设置固定宽度，避免大量列宽计算
+    for (int i = columnsToResize; i < columnCount; ++i) {
+        ui->tableView->setColumnWidth(i, 80); // 设置固定宽度为80像素
+    }
+    
+    // 确保表格内容清晰可见（重置任何可能影响显示的设置）
+    ui->tableView->setAlternatingRowColors(false);
+    ui->tableView->setStyleSheet("/* 清空之前的样式表，使用系统默认样式 */");
+    
+    qint64 uiDisplayTime = uiDisplayTimer.elapsed();
+    qDebug() << "UI display time:" << uiDisplayTime << "ms" << "(" << m_currentLoadedRows << " rows)";
+}
+
+void MainWindow::loadMoreRows()
+{
+    // 检查是否还有未加载的数据
+    int totalRows = m_csvReader->getRowCount();
+    if (m_currentLoadedRows >= totalRows) {
+        return; // 已经加载了所有数据
+    }
+    
+    // 计时：加载更多数据的过程
+    QElapsedTimer loadMoreTimer;
+    loadMoreTimer.start();
+    
+    // 计算要加载的行数，每次加载DEFAULT_ROWS_LIMIT行或剩余的所有行
+    int remainingRows = totalRows - m_currentLoadedRows;
+    int rowsToLoad = qMin(DEFAULT_ROWS_LIMIT / 2, remainingRows); // 每次加载默认限制的一半
+    
+    // 获取更多数据行
+    QList<QStringList> moreRows = m_csvReader->getRowsRange(m_currentLoadedRows, rowsToLoad);
+    
+    // 添加到表格模型
+    m_tableModel->addRows(moreRows);
+    m_currentLoadedRows += rowsToLoad;
+    
+    qint64 loadMoreTime = loadMoreTimer.elapsed();
+    qDebug() << "Loaded additional" << rowsToLoad << "rows in" << loadMoreTime << "ms";
 }

@@ -3,6 +3,7 @@
 #include <QDebug>
 #include <QFileInfo>
 #include <QDir>
+#include <QElapsedTimer>
 #include "csv.hpp"
 
 CsvReader::CsvReader(QObject *parent)
@@ -47,9 +48,57 @@ bool CsvReader::loadFile(const QString &filePath)
     
     qDebug() << "File exists and is readable:" << filePath << "Size:" << fileSize << "bytes";
     
-    // 使用vincentlaucsb的CSV解析库解析文件
+    // 使用Qt打开文件（支持中文路径），然后将内容传递给第三方库
     try {
-        return parseCsvFile(filePath.toStdString());
+        // 转换QString路径为UTF-8编码的std::string
+        std::string utf8FilePath = filePath.toUtf8().constData();
+        
+        // 使用第三方库的CSVReader直接打开文件
+        using namespace csv;
+        
+        // 计时：库读取文件
+        QElapsedTimer libraryReadTimer;
+        libraryReadTimer.start();
+        CSVReader reader(utf8FilePath);
+        qint64 libraryReadTime = libraryReadTimer.elapsed();
+        qDebug() << "Library read time:" << libraryReadTime << "ms";
+
+            // 计时：添加表头
+            QElapsedTimer headersTimer;
+            headersTimer.start();
+            
+            // 获取表头
+            auto col_names = reader.get_col_names();
+            qDebug() << "Number of columns detected:" << col_names.size();
+            m_headers.clear();
+            for (const auto& name : col_names) {
+                m_headers.append(QString::fromStdString(name));
+            }
+            
+            qint64 headersTime = headersTimer.elapsed();
+            qDebug() << "Headers processing time:" << headersTime << "ms";
+
+            // 计时：读取数据行
+            QElapsedTimer rowsTimer;
+            rowsTimer.start();
+            
+            // 读取数据行
+            m_dataRows.clear();
+            int rowCount = 0;
+            for (auto& row : reader) {
+                QStringList qRow;
+                for (size_t i = 0; i < row.size(); i++) {
+                    qRow.append(QString::fromStdString(row[i].get<std::string>()));
+                }
+                m_dataRows.append(qRow);
+                rowCount++;
+            }
+            
+            qint64 rowsTime = rowsTimer.elapsed();
+            qDebug() << "Rows processing time:" << rowsTime << "ms" << "(" << rowCount << " rows)";
+
+            qDebug() << "Total rows read:" << rowCount;
+            return true;
     } catch (const std::exception &e) {
         m_lastError = QString("Error parsing CSV file: %1").arg(e.what());
         qDebug() << m_lastError;
@@ -61,58 +110,7 @@ bool CsvReader::loadFile(const QString &filePath)
     }
 }
 
-bool CsvReader::parseCsvFile(const std::string &filename)
-{
-    try {
-        // 使用vincentlaucsb的csv-parser库
-        using namespace csv;
-        
-        qDebug() << "Attempting to parse file with csv-parser library:" << QString::fromStdString(filename);
-        
-        // 创建CSV读取器
-        CSVReader reader(filename);
-        
-        // 获取表头
-        auto col_names = reader.get_col_names();
-        qDebug() << "Number of columns detected:" << col_names.size();
-        
-        for (const auto& name : col_names) {
-            m_headers.append(QString::fromStdString(name));
-            qDebug() << "Column:" << QString::fromStdString(name);
-        }
-        
-        // 读取数据行
-        m_dataRows.clear();
-        int rowCount = 0;
-        for (auto& row : reader) {  // 注意：这里使用非const引用
-            QStringList qRow;
-            for (size_t i = 0; i < row.size(); i++) {
-                // 使用索引访问字段并获取其值
-                qRow.append(QString::fromStdString(row[i].get<std::string>()));
-            }
-            m_dataRows.append(qRow);
-            rowCount++;
-            
-            // 限制输出调试信息的数量
-            if (rowCount <= 5) {
-                qDebug() << "Row" << rowCount << ":" << qRow;
-            } else if (rowCount == 6) {
-                qDebug() << "... (additional rows omitted for brevity)";
-            }
-        }
-        
-        qDebug() << "Total rows read:" << rowCount;
-        return true;
-    } catch (const std::exception &e) {
-        m_lastError = QString("Error parsing CSV file: %1").arg(e.what());
-        qDebug() << m_lastError;
-        return false;
-    } catch (...) {
-        m_lastError = "Unknown error occurred in parseCsvFile";
-        qDebug() << m_lastError;
-        return false;
-    }
-}
+
 
 QStringList CsvReader::getHeaders() const
 {
@@ -130,6 +128,31 @@ QStringList CsvReader::getRow(int index) const
         return m_dataRows.at(index);
     }
     return QStringList();
+}
+
+QList<QStringList> CsvReader::getAllRows() const
+{
+    return m_dataRows;
+}
+
+QList<QStringList> CsvReader::getRowsRange(int startIndex, int count) const
+{
+    QList<QStringList> result;
+    
+    // 验证索引范围
+    if (startIndex < 0 || count <= 0 || startIndex >= m_dataRows.size()) {
+        return result;
+    }
+    
+    // 计算实际要获取的行数
+    int actualCount = qMin(count, m_dataRows.size() - startIndex);
+    
+    // 获取指定范围的数据行
+    for (int i = 0; i < actualCount; ++i) {
+        result.append(m_dataRows.at(startIndex + i));
+    }
+    
+    return result;
 }
 
 QString CsvReader::getLastError() const
