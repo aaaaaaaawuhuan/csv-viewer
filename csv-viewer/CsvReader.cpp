@@ -10,7 +10,10 @@
 
 CsvReader::CsvReader(QObject *parent)
     : QObject(parent)
-    , m_encoding(UTF8) // 默认使用UTF-8编码
+    , m_encoding(GBK) // 默认使用UTF-8编码
+    , m_totalRowCount(0)
+    , m_hasMoreData(false)
+    , m_lastLoadedRow(-1)
 {
 }
 
@@ -155,22 +158,53 @@ bool CsvReader::loadFile(const QString &filePath)
             QElapsedTimer rowsTimer;
             rowsTimer.start();
             
-            // 读取数据行
+            // 优化1: 预分配容器大小以减少重分配
             m_dataRows.clear();
+            m_dataRows.reserve(25000); // 根据预估的行数预分配
             int rowCount = 0;
+            
+            // 优化2: 减少内存重分配
+            // 优化3: 流式处理，仅加载需要的数据
+            const int MAX_INITIAL_ROWS = 10000; // 初始加载的最大行数
             for (auto& row : reader) {
+                // 超过初始行数后停止加载
+                if (rowCount >= MAX_INITIAL_ROWS) {
+                    break;
+                }
+                
                 QStringList qRow;
+                qRow.reserve(row.size()); // 预分配每行列数
+                
+                // 处理数据行
                 for (size_t i = 0; i < row.size(); i++) {
                     qRow.append(QString::fromStdString(row[i].get<std::string>()));
                 }
+                
                 m_dataRows.append(qRow);
                 rowCount++;
             }
             
             qint64 rowsTime = rowsTimer.elapsed();
-            qDebug() << "Rows processing time:" << rowsTime << "ms" << "(" << rowCount << " rows)";
-
-            qDebug() << "Total rows read:" << rowCount;
+            qDebug() << "Rows processing time:" << rowsTime << "ms" << "(" << rowCount << " rows loaded initially)";
+            qDebug() << "Memory usage: ~" << (m_dataRows.capacity() * m_headers.size() * 20) / (1024*1024) << "MB (estimated)";
+            
+            // 记录总行数，但不加载所有数据
+            // 这是一个估算值，实际行数可能需要完整读取文件才能确定
+            // 对于大文件，可以考虑保存文件内容以便后续分页加载
+            m_totalRowCount = rowCount;
+            if (rowCount >= MAX_INITIAL_ROWS) {
+                // 如果文件还有更多行，标记为需要延迟加载
+                m_hasMoreData = true;
+                m_lastLoadedRow = rowCount - 1;
+                m_fileContentBackup = content; // 保存文件内容用于后续加载
+                qDebug() << "File may have more data, enabled lazy loading.";
+            } else {
+                m_hasMoreData = false;
+                m_lastLoadedRow = rowCount - 1;
+                m_totalRowCount = rowCount;
+            }
+            
+            qDebug() << "Initially loaded rows:" << rowCount;
             return true;
     } catch (const std::exception &e) {
         m_lastError = QString("Error parsing CSV file: %1").arg(e.what());
@@ -231,4 +265,91 @@ QList<QStringList> CsvReader::getRowsRange(int startIndex, int count) const
 QString CsvReader::getLastError() const
 {
     return m_lastError;
+}
+
+// 延迟加载相关方法实现
+bool CsvReader::hasMoreData() const
+{
+    return m_hasMoreData;
+}
+
+int CsvReader::getEstimatedTotalRows() const
+{
+    return m_totalRowCount;
+}
+
+int CsvReader::getLastLoadedRowIndex() const
+{
+    return m_lastLoadedRow;
+}
+
+bool CsvReader::loadMoreRows(int count)
+{
+    if (!m_hasMoreData || m_fileContentBackup.isEmpty()) {
+        return false;
+    }
+    
+    try {
+        QElapsedTimer loadTimer;
+        loadTimer.start();
+        
+        // 将QString转换为UTF-8编码的std::string
+        std::string utf8Content = m_fileContentBackup.toUtf8().constData();
+        
+        // 将内容放入std::istringstream中，以便csv库读取
+        std::istringstream csvStream(utf8Content);
+        
+        // 使用第三方库的CSVReader从流中读取
+        using namespace csv;
+        CSVReader reader(csvStream);
+        
+        // 跳过已经加载的行
+        int rowsSkipped = 0;
+        for (auto& row : reader) {
+            if (rowsSkipped > m_lastLoadedRow) {
+                break;
+            }
+            rowsSkipped++;
+        }
+        
+        // 加载指定数量的新行
+        int newRowsLoaded = 0;
+        for (auto& row : reader) {
+            if (newRowsLoaded >= count) {
+                break;
+            }
+            
+            QStringList qRow;
+            qRow.reserve(row.size()); // 预分配每行列数
+            
+            // 处理数据行
+            for (size_t i = 0; i < row.size(); i++) {
+                qRow.append(QString::fromStdString(row[i].get<std::string>()));
+            }
+            
+            m_dataRows.append(qRow);
+            newRowsLoaded++;
+            m_lastLoadedRow++;
+        }
+        
+        // 检查是否还有更多数据
+        if (newRowsLoaded < count) {
+            m_hasMoreData = false;
+            m_totalRowCount = m_lastLoadedRow + 1;
+        }
+        
+        qDebug() << "Loaded" << newRowsLoaded << "more rows in" << loadTimer.elapsed() << "ms";
+        qDebug() << "Total rows loaded now:" << m_dataRows.size();
+        qDebug() << "Memory usage: ~" << (m_dataRows.capacity() * m_headers.size() * 20) / (1024*1024) << "MB (estimated)";
+        
+        return newRowsLoaded > 0;
+    } catch (const std::exception &e) {
+        m_lastError = QString("Error loading more rows: %1").arg(e.what());
+        qDebug() << m_lastError;
+        return false;
+    } catch (...) {
+        m_lastError = "Unknown error occurred while loading more rows";
+        qDebug() << m_lastError;
+        return false;
+    }
 }

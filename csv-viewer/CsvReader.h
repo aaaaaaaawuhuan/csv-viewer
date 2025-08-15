@@ -49,6 +49,12 @@ public:
     
     // 获取错误信息
     QString getLastError() const;
+    
+    // 延迟加载相关方法
+    bool hasMoreData() const; // 是否有更多数据未加载
+    int getEstimatedTotalRows() const; // 获取估计的总行数
+    bool loadMoreRows(int count); // 加载更多数据行
+    int getLastLoadedRowIndex() const; // 获取最后加载的行索引
 
 private:
     // CSV数据存储
@@ -57,6 +63,11 @@ private:
     QString m_lastError;
     Encoding m_encoding; // 当前设置的编码
     
+    // 延迟加载相关成员变量
+    int m_totalRowCount; // 估计的总行数
+    bool m_hasMoreData; // 是否还有更多数据未加载
+    int m_lastLoadedRow; // 最后加载的行索引
+    QString m_fileContentBackup; // 保存文件内容用于后续加载
 
 };
 

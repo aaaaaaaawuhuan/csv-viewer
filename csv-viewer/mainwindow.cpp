@@ -212,27 +212,38 @@ void MainWindow::displayCsvData(bool loadAll)
 
 void MainWindow::loadMoreRows()
 {
-    // 检查是否还有未加载的数据
-    int totalRows = m_csvReader->getRowCount();
-    if (m_currentLoadedRows >= totalRows) {
-        return; // 已经加载了所有数据
+    // 检查是否还有未加载的数据（使用CsvReader的延迟加载功能）
+    if (!m_csvReader->hasMoreData()) {
+        return; // 已经加载了所有数据或没有更多数据可加载
     }
     
     // 计时：加载更多数据的过程
     QElapsedTimer loadMoreTimer;
     loadMoreTimer.start();
     
-    // 计算要加载的行数，每次加载DEFAULT_ROWS_LIMIT行或剩余的所有行
-    int remainingRows = totalRows - m_currentLoadedRows;
-    int rowsToLoad = qMin(DEFAULT_ROWS_LIMIT / 2, remainingRows); // 每次加载默认限制的一半
+    // 定义每次加载的行数
+    const int ROWS_PER_LOAD = DEFAULT_ROWS_LIMIT / 4; // 每次加载默认限制的四分之一
     
-    // 获取更多数据行
-    QList<QStringList> moreRows = m_csvReader->getRowsRange(m_currentLoadedRows, rowsToLoad);
-    
-    // 添加到表格模型
-    m_tableModel->addRows(moreRows);
-    m_currentLoadedRows += rowsToLoad;
-    
-    qint64 loadMoreTime = loadMoreTimer.elapsed();
-    qDebug() << "Loaded additional" << rowsToLoad << "rows in" << loadMoreTime << "ms";
+    // 加载更多数据行
+    if (m_csvReader->loadMoreRows(ROWS_PER_LOAD)) {
+        // 获取已加载数据的总行数
+        int totalRows = m_csvReader->getRowCount();
+        
+        // 计算新加载的行数
+        int newlyLoadedRows = totalRows - m_currentLoadedRows;
+        
+        if (newlyLoadedRows > 0) {
+            // 获取新加载的数据行
+            QList<QStringList> moreRows = m_csvReader->getRowsRange(m_currentLoadedRows, newlyLoadedRows);
+            
+            // 添加到表格模型
+            m_tableModel->addRows(moreRows);
+            m_currentLoadedRows = totalRows;
+            
+            qint64 loadMoreTime = loadMoreTimer.elapsed();
+            qDebug() << "Loaded additional" << newlyLoadedRows << "rows in" << loadMoreTime << "ms";
+        }
+    } else {
+        qDebug() << "Failed to load more rows: " << m_csvReader->getLastError();
+    }
 }
