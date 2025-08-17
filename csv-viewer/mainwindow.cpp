@@ -312,15 +312,16 @@ void MainWindow::setupFilterPanel(const QStringList &headers)
     clearAllButton->setMinimumWidth(70);
     
     // 设置按钮样式
-    selectAllButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    clearAllButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    selectAllButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    clearAllButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     
     connect(selectAllButton, &QPushButton::clicked, this, &MainWindow::selectAllColumns);
     connect(clearAllButton, &QPushButton::clicked, this, &MainWindow::clearAllColumns);
     
     // 让按钮在水平布局中均匀分布
     controlButtonsLayout->addWidget(selectAllButton);
-    controlButtonsLayout->addSpacing(5); // 按钮之间添加间距
+    QSpacerItem* horizontalSpacer = new QSpacerItem(40, 20, QSizePolicy::Expanding, QSizePolicy::Minimum);
+    controlButtonsLayout->addItem(horizontalSpacer);
     controlButtonsLayout->addWidget(clearAllButton);
     
     filterLayout->addLayout(controlButtonsLayout);
