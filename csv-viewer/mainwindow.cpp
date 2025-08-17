@@ -9,6 +9,10 @@
 #include <QDebug>
 #include <QElapsedTimer>
 #include <QScrollBar>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QPushButton>
+#include <QCheckBox>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -16,6 +20,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_tableModel(new TableModel(this))
     , m_csvReader(new CsvReader(this))
     , m_currentFilePath(QString())
+    , m_isFiltered(false)
 {
     ui->setupUi(this);
     
@@ -49,8 +54,15 @@ MainWindow::MainWindow(QWidget *parent)
     // 连接菜单项到打开文件槽函数
     connect(ui->actionOpen, &QAction::triggered, this, &MainWindow::openFile);
     
+    // 连接筛选按钮到槽函数
+    connect(ui->filterButton, &QPushButton::clicked, this, &MainWindow::applyFilter);
+    
     // 创建编码选择菜单
     createEncodingMenu();
+    
+    // 初始隐藏表格数据，直到用户点击筛选按钮
+    ui->tableView->setVisible(false);
+    statusBar()->showMessage(tr("请打开CSV文件，然后使用左侧面板筛选列"));
 }
 
 MainWindow::~MainWindow()
@@ -176,38 +188,31 @@ void MainWindow::displayCsvData(bool loadAll)
     m_tableModel->clear();
     m_currentLoadedRows = 0;
     
-    // 设置表头
-    m_tableModel->setHeaders(m_csvReader->getHeaders());
+    // 重置筛选状态
+    resetFilterPanel();
+    
+    // 保存表头和原始数据
+    QStringList headers = m_csvReader->getHeaders();
     
     // 获取要加载的行数
     int totalRows = m_csvReader->getRowCount();
     int rowsToLoad = loadAll ? totalRows : qMin(DEFAULT_ROWS_LIMIT, totalRows);
     
-    // 添加数据行
+    // 保存原始数据用于筛选
     if (rowsToLoad > 0) {
-        QList<QStringList> rows = m_csvReader->getRowsRange(0, rowsToLoad);
-        m_tableModel->addRows(rows);
+        m_originalData = m_csvReader->getRowsRange(0, rowsToLoad);
         m_currentLoadedRows = rowsToLoad;
     }
     
-    // 优化列宽调整：大幅减少需要调整的列数，提高性能
-    int columnCount = m_csvReader->getHeaders().size();
-    int columnsToResize = qMin(columnCount, 10); // 只调整前10列，显著提高性能
-    for (int i = 0; i < columnsToResize; ++i) {
-        ui->tableView->resizeColumnToContents(i);
-    }
+    // 设置筛选面板，但不显示表格数据
+    setupFilterPanel(headers);
     
-    // 对于剩余的列，设置固定宽度，避免大量列宽计算
-    for (int i = columnsToResize; i < columnCount; ++i) {
-        ui->tableView->setColumnWidth(i, 80); // 设置固定宽度为80像素
-    }
-    
-    // 确保表格内容清晰可见（重置任何可能影响显示的设置）
-    ui->tableView->setAlternatingRowColors(false);
-    ui->tableView->setStyleSheet("/* 清空之前的样式表，使用系统默认样式 */");
+    // 隐藏表格，直到用户点击筛选按钮
+    ui->tableView->setVisible(false);
+    statusBar()->showMessage(tr("请在左侧选择要显示的列，然后点击'筛选'按钮"));
     
     qint64 uiDisplayTime = uiDisplayTimer.elapsed();
-    qDebug() << "UI display time:" << uiDisplayTime << "ms" << "(" << m_currentLoadedRows << " rows)";
+    qDebug() << "UI display time (loading headers only):" << uiDisplayTime << "ms";
 }
 
 void MainWindow::loadMoreRows()
@@ -233,17 +238,189 @@ void MainWindow::loadMoreRows()
         int newlyLoadedRows = totalRows - m_currentLoadedRows;
         
         if (newlyLoadedRows > 0) {
-            // 获取新加载的数据行
-            QList<QStringList> moreRows = m_csvReader->getRowsRange(m_currentLoadedRows, newlyLoadedRows);
+            // 获取新加载的原始数据行
+            QList<QStringList> moreOriginalRows = m_csvReader->getRowsRange(m_currentLoadedRows, newlyLoadedRows);
             
-            // 添加到表格模型
-            m_tableModel->addRows(moreRows);
+            // 将新加载的行添加到原始数据中
+            m_originalData.append(moreOriginalRows);
             m_currentLoadedRows = totalRows;
+            
+            if (m_isFiltered) {
+                // 如果当前处于筛选状态，需要重新应用筛选
+                updateFilteredColumns();
+            } else {
+                // 否则直接添加到表格模型
+                m_tableModel->addRows(moreOriginalRows);
+            }
             
             qint64 loadMoreTime = loadMoreTimer.elapsed();
             qDebug() << "Loaded additional" << newlyLoadedRows << "rows in" << loadMoreTime << "ms";
         }
     } else {
         qDebug() << "Failed to load more rows: " << m_csvReader->getLastError();
+    }
+}
+
+void MainWindow::setupFilterPanel(const QStringList &headers)
+{
+    // 清空现有布局中的所有组件
+    resetFilterPanel();
+    
+    // 创建筛选布局
+    QVBoxLayout *filterLayout = qobject_cast<QVBoxLayout*>(ui->filterContentWidget->layout());
+    if (!filterLayout) {
+        filterLayout = new QVBoxLayout(ui->filterContentWidget);
+        ui->filterContentWidget->setLayout(filterLayout);
+    }
+    
+    // 添加全选和清除按钮
+    QHBoxLayout *controlButtonsLayout = new QHBoxLayout();
+    QPushButton *selectAllButton = new QPushButton(tr("全选"), this);
+    QPushButton *clearAllButton = new QPushButton(tr("清除"), this);
+    
+    connect(selectAllButton, &QPushButton::clicked, this, &MainWindow::selectAllColumns);
+    connect(clearAllButton, &QPushButton::clicked, this, &MainWindow::clearAllColumns);
+    
+    controlButtonsLayout->addWidget(selectAllButton);
+    controlButtonsLayout->addWidget(clearAllButton);
+    
+    filterLayout->addLayout(controlButtonsLayout);
+    
+    // 添加列复选框
+    for (int i = 0; i < headers.size(); ++i) {
+        QCheckBox *checkBox = new QCheckBox(headers[i], this);
+        checkBox->setChecked(true); // 默认选中所有列
+        checkBox->setObjectName(QString("columnCheckBox_%1").arg(i));
+        filterLayout->addWidget(checkBox);
+        
+        // 存储复选框及其状态
+        m_columnCheckboxes.append(qMakePair(checkBox, true));
+    }
+    
+    // 添加一个伸缩项，确保所有复选框都显示在顶部
+    filterLayout->addStretch();
+}
+
+void MainWindow::resetFilterPanel()
+{
+    // 清除所有复选框
+    for (auto &pair : m_columnCheckboxes) {
+        delete pair.first;
+    }
+    m_columnCheckboxes.clear();
+    
+    // 清除筛选状态
+    m_isFiltered = false;
+    m_filteredHeaders.clear();
+    
+    // 清空布局
+    QVBoxLayout *filterLayout = qobject_cast<QVBoxLayout*>(ui->filterContentWidget->layout());
+    if (filterLayout) {
+        QLayoutItem *item;
+        while ((item = filterLayout->takeAt(0)) != nullptr) {
+            if (item->widget()) {
+                delete item->widget();
+            }
+            delete item;
+        }
+    }
+}
+
+void MainWindow::applyFilter()
+{
+    // 收集选中的列
+    m_filteredHeaders.clear();
+    QVector<int> selectedColumns;
+    
+    for (int i = 0; i < m_columnCheckboxes.size(); ++i) {
+        if (m_columnCheckboxes[i].first->isChecked()) {
+            m_filteredHeaders.append(m_columnCheckboxes[i].first->text());
+            selectedColumns.append(i);
+        }
+    }
+    
+    // 如果没有选中任何列，显示提示
+    if (m_filteredHeaders.isEmpty()) {
+        QMessageBox::information(this, tr("提示"), tr("请至少选择一列"));
+        return;
+    }
+    
+    // 更新筛选状态
+    m_isFiltered = true;
+    
+    // 应用筛选并显示结果
+    updateFilteredColumns();
+    
+    // 显示表格
+    ui->tableView->setVisible(true);
+    statusBar()->showMessage(tr("已筛选显示 %1 列数据").arg(m_filteredHeaders.size()));
+}
+
+void MainWindow::updateFilteredColumns()
+{
+    // 清空现有数据
+    m_tableModel->clear();
+    
+    // 设置筛选后的表头
+    m_tableModel->setHeaders(m_filteredHeaders);
+    
+    // 如果没有原始数据，直接返回
+    if (m_originalData.isEmpty()) {
+        return;
+    }
+    
+    // 收集选中的列索引
+    QVector<int> selectedColumns;
+    for (int i = 0; i < m_columnCheckboxes.size(); ++i) {
+        if (m_columnCheckboxes[i].first->isChecked()) {
+            selectedColumns.append(i);
+        }
+    }
+    
+    // 筛选数据行
+    QList<QStringList> filteredRows;
+    for (const QStringList &row : m_originalData) {
+        QStringList filteredRow;
+        for (int colIndex : selectedColumns) {
+            if (colIndex < row.size()) {
+                filteredRow.append(row[colIndex]);
+            } else {
+                filteredRow.append(QString()); // 对于超出范围的列，添加空字符串
+            }
+        }
+        filteredRows.append(filteredRow);
+    }
+    
+    // 添加筛选后的数据行
+    if (!filteredRows.isEmpty()) {
+        m_tableModel->addRows(filteredRows);
+    }
+    
+    // 优化列宽调整：大幅减少需要调整的列数，提高性能
+    int columnCount = m_filteredHeaders.size();
+    int columnsToResize = qMin(columnCount, 10); // 只调整前10列，显著提高性能
+    for (int i = 0; i < columnsToResize; ++i) {
+        ui->tableView->resizeColumnToContents(i);
+    }
+    
+    // 对于剩余的列，设置固定宽度，避免大量列宽计算
+    for (int i = columnsToResize; i < columnCount; ++i) {
+        ui->tableView->setColumnWidth(i, 80); // 设置固定宽度为80像素
+    }
+}
+
+void MainWindow::selectAllColumns()
+{
+    for (auto &pair : m_columnCheckboxes) {
+        pair.first->setChecked(true);
+        pair.second = true;
+    }
+}
+
+void MainWindow::clearAllColumns()
+{
+    for (auto &pair : m_columnCheckboxes) {
+        pair.first->setChecked(false);
+        pair.second = false;
     }
 }

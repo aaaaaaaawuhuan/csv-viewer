@@ -7,6 +7,9 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QTableView>
+#include <QCheckBox>
+#include <QVector>
+#include <QPair>
 
 #include "CsvReader.h"
 #include "TableModel.h"
@@ -29,6 +32,15 @@ private slots:
     
     // 加载更多行数据
     void loadMoreRows();
+    
+    // 处理筛选按钮点击
+    void applyFilter();
+    
+    // 全选所有列
+    void selectAllColumns();
+    
+    // 清空所有列选择
+    void clearAllColumns();
 
 private:
     // 加载CSV文件
@@ -43,6 +55,15 @@ private:
     // 在编码变更时重新加载当前文件（如果有）
     void reloadCurrentFileIfNeeded();
     
+    // 设置筛选面板
+    void setupFilterPanel(const QStringList &headers);
+    
+    // 更新表格显示以反映筛选结果
+    void updateFilteredColumns();
+    
+    // 重置筛选面板
+    void resetFilterPanel();
+
     Ui::MainWindow *ui;
     CsvReader *m_csvReader;
     TableModel *m_tableModel;
@@ -53,6 +74,12 @@ private:
     
     // 当前打开的文件路径，用于编码变更时重新加载
     QString m_currentFilePath;
+    
+    // 筛选相关成员
+    QVector<QPair<QCheckBox*, bool>> m_columnCheckboxes; // 存储列复选框及其状态
+    QStringList m_filteredHeaders; // 存储筛选后的表头
+    QList<QStringList> m_originalData; // 存储原始数据用于筛选
+    bool m_isFiltered = false; // 标记是否处于筛选状态
 };
 
 #endif // MAINWINDOW_H
