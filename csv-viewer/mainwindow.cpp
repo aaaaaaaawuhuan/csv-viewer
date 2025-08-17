@@ -290,15 +290,29 @@ void MainWindow::setupFilterPanel(const QStringList &headers)
         ui->filterContentWidget->setLayout(filterLayout);
     }
     
-    // 添加全选和清除按钮
+    // 增加筛选面板最小宽度，确保复选框文本完整显示
+    ui->filterDockWidget->setMinimumWidth(180);
+    ui->filterContentWidget->setMinimumWidth(170);
+    
+    // 添加全选和清空按钮
     QHBoxLayout *controlButtonsLayout = new QHBoxLayout();
     QPushButton *selectAllButton = new QPushButton(tr("全选"), this);
-    QPushButton *clearAllButton = new QPushButton(tr("清除"), this);
+    QPushButton *clearAllButton = new QPushButton(tr("清空"), this);
+    
+    // 设置按钮最小宽度，防止被过度压缩
+    selectAllButton->setMinimumWidth(70);
+    clearAllButton->setMinimumWidth(70);
+    
+    // 设置按钮样式
+    selectAllButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    clearAllButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     
     connect(selectAllButton, &QPushButton::clicked, this, &MainWindow::selectAllColumns);
     connect(clearAllButton, &QPushButton::clicked, this, &MainWindow::clearAllColumns);
     
+    // 让按钮在水平布局中均匀分布
     controlButtonsLayout->addWidget(selectAllButton);
+    controlButtonsLayout->addSpacing(5); // 按钮之间添加间距
     controlButtonsLayout->addWidget(clearAllButton);
     
     filterLayout->addLayout(controlButtonsLayout);
@@ -308,11 +322,16 @@ void MainWindow::setupFilterPanel(const QStringList &headers)
         QCheckBox *checkBox = new QCheckBox(headers[i], this);
         checkBox->setChecked(true); // 默认选中所有列
         checkBox->setObjectName(QString("columnCheckBox_%1").arg(i));
+        // 设置复选框的尺寸策略，确保文本不会被截断
+        checkBox->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+        checkBox->setMinimumWidth(150); // 确保有足够的宽度显示文本
         filterLayout->addWidget(checkBox);
         
         // 存储复选框及其状态
         m_columnCheckboxes.append(qMakePair(checkBox, true));
     }
+    
+
     
     // 添加一个伸缩项，确保所有复选框都显示在顶部
     filterLayout->addStretch();
