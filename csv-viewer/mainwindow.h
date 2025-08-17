@@ -41,6 +41,9 @@ private slots:
     
     // 清空所有列选择
     void clearAllColumns();
+    
+    // 切换筛选面板的显示/隐藏状态
+    void toggleFilterPanel(bool visible);
 
 private:
     // 加载CSV文件

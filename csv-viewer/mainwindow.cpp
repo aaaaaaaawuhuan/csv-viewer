@@ -60,6 +60,13 @@ MainWindow::MainWindow(QWidget *parent)
     // 创建编码选择菜单
     createEncodingMenu();
     
+    // 连接视图菜单中显示筛选面板的动作
+    connect(ui->actionShowFilterPanel, &QAction::triggered, this, &MainWindow::toggleFilterPanel);
+    
+    // 确保筛选面板初始可见
+    ui->actionShowFilterPanel->setChecked(true);
+    ui->filterDockWidget->show();
+    
     // 初始隐藏表格数据，直到用户点击筛选按钮
     ui->tableView->setVisible(false);
     statusBar()->showMessage(tr("请打开CSV文件，然后使用左侧面板筛选列"));
@@ -423,4 +430,17 @@ void MainWindow::clearAllColumns()
         pair.first->setChecked(false);
         pair.second = false;
     }
+}
+
+void MainWindow::toggleFilterPanel(bool visible)
+{
+    // 根据传入的参数显示或隐藏筛选面板
+    if (visible) {
+        ui->filterDockWidget->show();
+    } else {
+        ui->filterDockWidget->hide();
+    }
+    
+    // 确保动作的选中状态与面板的实际显示状态一致
+    ui->actionShowFilterPanel->setChecked(visible);
 }
