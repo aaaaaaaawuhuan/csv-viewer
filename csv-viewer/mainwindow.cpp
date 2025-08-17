@@ -43,8 +43,6 @@ MainWindow::MainWindow(QWidget *parent)
     ui->tableView->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel); // 像素滚动
     ui->tableView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel); // 像素滚动
     ui->tableView->setAttribute(Qt::WA_AlwaysShowToolTips);
-    ui->tableView->setAttribute(Qt::WA_OpaquePaintEvent);
-    ui->tableView->viewport()->setAttribute(Qt::WA_OpaquePaintEvent);
     
     // 设置表格字体为支持中文的字体
     QFont font = ui->tableView->font();
@@ -62,6 +60,11 @@ MainWindow::MainWindow(QWidget *parent)
     
     // 连接视图菜单中显示筛选面板的动作
     connect(ui->actionShowFilterPanel, &QAction::triggered, this, &MainWindow::toggleFilterPanel);
+    
+    // 连接dockWidget的可见性变化信号
+    connect(ui->filterDockWidget, &QDockWidget::visibilityChanged, this, [this](bool visible) {
+        ui->actionShowFilterPanel->setChecked(visible);
+    });
     
     // 确保筛选面板初始可见
     ui->actionShowFilterPanel->setChecked(true);
@@ -201,25 +204,34 @@ void MainWindow::displayCsvData(bool loadAll)
     // 保存表头和原始数据
     QStringList headers = m_csvReader->getHeaders();
     
+    // 设置表头
+    m_tableModel->setHeaders(headers);
+    
     // 获取要加载的行数
     int totalRows = m_csvReader->getRowCount();
     int rowsToLoad = loadAll ? totalRows : qMin(DEFAULT_ROWS_LIMIT, totalRows);
     
-    // 保存原始数据用于筛选
+    // 保存原始数据并直接加载到表格模型中
     if (rowsToLoad > 0) {
         m_originalData = m_csvReader->getRowsRange(0, rowsToLoad);
         m_currentLoadedRows = rowsToLoad;
+        m_tableModel->addRows(m_originalData);
     }
     
-    // 设置筛选面板，但不显示表格数据
+    // 设置筛选面板
     setupFilterPanel(headers);
+    
+    // 初始时隐藏所有列，直到用户点击筛选按钮
+    for (int i = 0; i < headers.size(); ++i) {
+        ui->tableView->setColumnHidden(i, true);
+    }
     
     // 隐藏表格，直到用户点击筛选按钮
     ui->tableView->setVisible(false);
     statusBar()->showMessage(tr("请在左侧选择要显示的列，然后点击'筛选'按钮"));
     
     qint64 uiDisplayTime = uiDisplayTimer.elapsed();
-    qDebug() << "UI display time (loading headers only):" << uiDisplayTime << "ms";
+    qDebug() << "UI display time (loading all data):" << uiDisplayTime << "ms";
 }
 
 void MainWindow::loadMoreRows()
@@ -252,13 +264,8 @@ void MainWindow::loadMoreRows()
             m_originalData.append(moreOriginalRows);
             m_currentLoadedRows = totalRows;
             
-            if (m_isFiltered) {
-                // 如果当前处于筛选状态，需要重新应用筛选
-                updateFilteredColumns();
-            } else {
-                // 否则直接添加到表格模型
-                m_tableModel->addRows(moreOriginalRows);
-            }
+            // 直接添加到表格模型中，列的可见性已经通过setColumnHidden设置
+            m_tableModel->addRows(moreOriginalRows);
             
             qint64 loadMoreTime = loadMoreTimer.elapsed();
             qDebug() << "Loaded additional" << newlyLoadedRows << "rows in" << loadMoreTime << "ms";
@@ -337,14 +344,18 @@ void MainWindow::applyFilter()
 {
     // 收集选中的列
     m_filteredHeaders.clear();
-    QVector<int> selectedColumns;
-    
+    QVector<int> visibleColumns;
+    qDebug() << "Colum" << ui->tableView->model()->columnCount();
     for (int i = 0; i < m_columnCheckboxes.size(); ++i) {
-        if (m_columnCheckboxes[i].first->isChecked()) {
+        bool isVisible = m_columnCheckboxes[i].first->isChecked();
+
+        if (isVisible) {
             m_filteredHeaders.append(m_columnCheckboxes[i].first->text());
-            selectedColumns.append(i);
+            visibleColumns.append(i);
         }
+        ui->tableView->setColumnHidden(i, !isVisible); // 通过隐藏/显示列实现筛选
     }
+
     
     // 如果没有选中任何列，显示提示
     if (m_filteredHeaders.isEmpty()) {
@@ -355,28 +366,40 @@ void MainWindow::applyFilter()
     // 更新筛选状态
     m_isFiltered = true;
     
-    // 应用筛选并显示结果
-    updateFilteredColumns();
+    // 更新表头，确保表头与可见列一致
+    //m_tableModel->setHeaders(m_filteredHeaders);
     
     // 显示表格
     ui->tableView->setVisible(true);
+    
+    // 优化列宽调整：大幅减少需要调整的列数，提高性能
+    int columnCount = m_tableModel->columnCount();
+    int columnsToResize = qMin(columnCount, 10); // 只调整前10列，显著提高性能
+    for (int i = 0; i < columnsToResize; ++i) {
+        if (!ui->tableView->isColumnHidden(i)) {
+            ui->tableView->resizeColumnToContents(i);
+        }
+    }
+    
     statusBar()->showMessage(tr("已筛选显示 %1 列数据").arg(m_filteredHeaders.size()));
 }
 
+/*
 void MainWindow::updateFilteredColumns()
 {
-    // 清空现有数据
+    // 该方法已废弃，现在通过隐藏列的方式实现筛选功能
+    // 清空现有数据和表头
     m_tableModel->clear();
+    
+    // 如果没有原始数据或没有选中列，直接返回
+    if (m_originalData.isEmpty() || m_filteredHeaders.isEmpty()) {
+        return;
+    }
     
     // 设置筛选后的表头
     m_tableModel->setHeaders(m_filteredHeaders);
     
-    // 如果没有原始数据，直接返回
-    if (m_originalData.isEmpty()) {
-        return;
-    }
-    
-    // 收集选中的列索引
+    // 收集选中的列索引并确保与m_filteredHeaders一致
     QVector<int> selectedColumns;
     for (int i = 0; i < m_columnCheckboxes.size(); ++i) {
         if (m_columnCheckboxes[i].first->isChecked()) {
@@ -403,6 +426,10 @@ void MainWindow::updateFilteredColumns()
         m_tableModel->addRows(filteredRows);
     }
     
+    // 优化刷新方式：使用更轻量级的刷新方法替代reset()以提高性能
+    ui->tableView->setModel(nullptr);
+    ui->tableView->setModel(m_tableModel);
+    
     // 优化列宽调整：大幅减少需要调整的列数，提高性能
     int columnCount = m_filteredHeaders.size();
     int columnsToResize = qMin(columnCount, 10); // 只调整前10列，显著提高性能
@@ -414,7 +441,7 @@ void MainWindow::updateFilteredColumns()
     for (int i = columnsToResize; i < columnCount; ++i) {
         ui->tableView->setColumnWidth(i, 80); // 设置固定宽度为80像素
     }
-}
+}*/
 
 void MainWindow::selectAllColumns()
 {
