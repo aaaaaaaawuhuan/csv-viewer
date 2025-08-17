@@ -43,9 +43,7 @@ MainWindow::MainWindow(QWidget *parent)
     ui->tableView->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel); // 像素滚动
     ui->tableView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel); // 像素滚动
     ui->tableView->setAttribute(Qt::WA_AlwaysShowToolTips);
-    // 移除这两行
-    ui->tableView->setAttribute(Qt::WA_OpaquePaintEvent);
-    ui->tableView->viewport()->setAttribute(Qt::WA_OpaquePaintEvent);
+
     
     // 设置表格字体为支持中文的字体
     QFont font = ui->tableView->font();
