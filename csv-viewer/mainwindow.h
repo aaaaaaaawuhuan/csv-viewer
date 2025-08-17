@@ -44,6 +44,9 @@ private slots:
     
     // 切换筛选面板的显示/隐藏状态
     void toggleFilterPanel(bool visible);
+    
+    // 根据输入过滤复选框显示
+    void filterCheckboxes(const QString &text);
 
 private:
     // 加载CSV文件
@@ -66,6 +69,9 @@ private:
     
     // 重置筛选面板
     void resetFilterPanel();
+    
+    // 搜索输入框
+    QLineEdit *m_searchLineEdit = nullptr;
 
     Ui::MainWindow *ui;
     CsvReader *m_csvReader;

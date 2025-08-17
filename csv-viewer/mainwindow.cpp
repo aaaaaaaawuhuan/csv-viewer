@@ -13,6 +13,7 @@
 #include <QHBoxLayout>
 #include <QPushButton>
 #include <QCheckBox>
+#include <QLineEdit>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -292,6 +293,15 @@ void MainWindow::setupFilterPanel(const QStringList &headers)
     ui->filterDockWidget->setMinimumWidth(180);
     ui->filterContentWidget->setMinimumWidth(170);
     
+    // 添加搜索输入框
+    m_searchLineEdit = new QLineEdit(this);
+    m_searchLineEdit->setPlaceholderText(tr("搜索列名..."));
+    m_searchLineEdit->setMinimumWidth(150);
+    filterLayout->addWidget(m_searchLineEdit);
+    
+    // 连接搜索框的文本变化信号
+    connect(m_searchLineEdit, &QLineEdit::textChanged, this, &MainWindow::filterCheckboxes);
+    
     // 添加全选和清空按钮
     QHBoxLayout *controlButtonsLayout = new QHBoxLayout();
     QPushButton *selectAllButton = new QPushButton(tr("全选"), this);
@@ -333,6 +343,25 @@ void MainWindow::setupFilterPanel(const QStringList &headers)
     
     // 添加一个伸缩项，确保所有复选框都显示在顶部
     filterLayout->addStretch();
+}
+
+void MainWindow::filterCheckboxes(const QString &text)
+{
+    // 如果搜索文本为空，显示所有复选框
+    if (text.isEmpty()) {
+        for (auto &pair : m_columnCheckboxes) {
+            pair.first->setVisible(true);
+        }
+        return;
+    }
+    
+    // 否则，只显示包含搜索文本的复选框
+    QString searchText = text.toLower();
+    for (auto &pair : m_columnCheckboxes) {
+        QString checkboxText = pair.first->text().toLower();
+        bool matches = checkboxText.contains(searchText);
+        pair.first->setVisible(matches);
+    }
 }
 
 void MainWindow::resetFilterPanel()
