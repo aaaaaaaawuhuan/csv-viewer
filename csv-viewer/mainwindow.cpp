@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "./ui_mainwindow.h"
 #include "TableModel.h"
+#include "VirtualTableModel.h"
 #include "CsvReader.h"
 #include <QFileDialog>
 #include <QMessageBox>
@@ -19,23 +20,22 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
     , m_tableModel(new TableModel(this))
+    , m_virtualTableModel(nullptr)
     , m_csvReader(new CsvReader(this))
+    , m_verticalScrollBar(new QScrollBar(Qt::Vertical, this))
     , m_currentFilePath(QString())
     , m_isFiltered(false)
+    , m_totalRows(0)
+    , m_visibleRows(100)
 {
     ui->setupUi(this);
     
     // 设置表格模型
     ui->tableView->setModel(m_tableModel);
     
-    // 连接表格视图的垂直滚动条信号，实现滚动到底部时加载更多数据
-    connect(ui->tableView->verticalScrollBar(), &QScrollBar::valueChanged, this, [this](int value) {
-        QScrollBar *scrollBar = ui->tableView->verticalScrollBar();
-        if (scrollBar && scrollBar->value() == scrollBar->maximum()) {
-            // 当滚动到最底部时，加载更多数据
-            loadMoreRows();
-        }
-    });
+    // 创建自定义垂直滚动条并添加到布局中
+    m_verticalScrollBar->hide(); // 初始隐藏自定义滚动条
+    connect(m_verticalScrollBar, &QScrollBar::valueChanged, this, &MainWindow::handleVerticalScroll);
     
     // 表格视图性能优化设置
     ui->tableView->setSortingEnabled(false); // 禁用排序，需要时再启用
@@ -44,7 +44,15 @@ MainWindow::MainWindow(QWidget *parent)
     ui->tableView->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel); // 像素滚动
     ui->tableView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel); // 像素滚动
     ui->tableView->setAttribute(Qt::WA_AlwaysShowToolTips);
-
+    
+    // 禁用QTableView的默认垂直滚动条
+    ui->tableView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    
+    // 将自定义滚动条添加到界面布局中
+    QGridLayout* gridLayout = qobject_cast<QGridLayout*>(ui->centralwidget->layout());
+    if (gridLayout) {
+        gridLayout->addWidget(m_verticalScrollBar, 0, 2); // 添加到网格布局的第0行第2列
+    }
     
     // 设置表格字体为支持中文的字体
     QFont font = ui->tableView->font();
@@ -80,6 +88,7 @@ MainWindow::MainWindow(QWidget *parent)
 MainWindow::~MainWindow()
 {
     delete ui;
+    delete m_virtualTableModel;
 }
 
 void MainWindow::openFile()
@@ -142,7 +151,13 @@ void MainWindow::reloadCurrentFileIfNeeded()
 {
     // 如果当前已经打开了文件，则重新加载
     if (!m_currentFilePath.isEmpty()) {
+        // 保存当前的虚拟表格模型，避免重复创建
+        VirtualTableModel* currentModel = m_virtualTableModel;
+        m_virtualTableModel = nullptr; // 防止loadCsvFile中再次创建
+        
         loadCsvFile(m_currentFilePath);
+        
+        m_virtualTableModel = currentModel; // 恢复原来的模型
     }
 }
 
@@ -179,6 +194,10 @@ void MainWindow::loadCsvFile(const QString &filePath)
     
     // 尝试加载文件
     if (m_csvReader->loadFile(absolutePath)) {
+        // 估算文件总行数
+        m_totalRows = m_csvReader->estimateTotalRows();
+        qDebug() << "Estimated total rows:" << m_totalRows;
+        
         displayCsvData(false); // 默认不加载全部数据
         setWindowTitle(QString("CSV Viewer - %1").arg(fileInfo.fileName()));
     } else {
@@ -196,29 +215,35 @@ void MainWindow::displayCsvData(bool loadAll)
     QElapsedTimer uiDisplayTimer;
     uiDisplayTimer.start();
     
+    // 初始化虚拟表格模型（如果尚未初始化）
+    if (!m_virtualTableModel) {
+        m_virtualTableModel = new VirtualTableModel(m_csvReader, this);
+    }
+    
     // 清空现有数据
-    m_tableModel->clear();
     m_currentLoadedRows = 0;
     
     // 重置筛选状态
     resetFilterPanel();
     
-    // 保存表头和原始数据
+    // 保存表头
     QStringList headers = m_csvReader->getHeaders();
     
     // 设置表头
-    m_tableModel->setHeaders(headers);
+    m_virtualTableModel->setHeaders(headers);
+    m_virtualTableModel->setTotalRowCount(m_totalRows);
     
-    // 获取要加载的行数
-    int totalRows = m_csvReader->getRowCount();
-    int rowsToLoad = loadAll ? totalRows : qMin(DEFAULT_ROWS_LIMIT, totalRows);
+    // 设置表格模型
+    ui->tableView->setModel(m_virtualTableModel);
     
-    // 保存原始数据并直接加载到表格模型中
-    if (rowsToLoad > 0) {
-        m_originalData = m_csvReader->getRowsRange(0, rowsToLoad);
-        m_currentLoadedRows = rowsToLoad;
-        m_tableModel->addRows(m_originalData);
-    }
+    // 设置自定义滚动条范围
+    m_verticalScrollBar->setMinimum(0);
+    m_verticalScrollBar->setMaximum(qMax(0, m_totalRows - m_visibleRows));
+    m_verticalScrollBar->setPageStep(m_visibleRows);
+    m_verticalScrollBar->setValue(0);
+    
+    // 显示自定义滚动条（需要添加到布局中）
+    m_verticalScrollBar->show();
     
     // 设置筛选面板
     setupFilterPanel(headers);
@@ -231,6 +256,9 @@ void MainWindow::displayCsvData(bool loadAll)
     // 隐藏表格，直到用户点击筛选按钮
     ui->tableView->setVisible(false);
     statusBar()->showMessage(tr("请在左侧选择要显示的列，然后点击'筛选'按钮"));
+    
+    // 预加载初始数据
+    m_virtualTableModel->loadDataRange(0, qMin(m_visibleRows + 50, m_totalRows));
     
     qint64 uiDisplayTime = uiDisplayTimer.elapsed();
     qDebug() << "UI display time (loading all data):" << uiDisplayTime << "ms";
@@ -348,21 +376,51 @@ void MainWindow::setupFilterPanel(const QStringList &headers)
 
 void MainWindow::filterCheckboxes(const QString &text)
 {
-    // 如果搜索文本为空，显示所有复选框
-    if (text.isEmpty()) {
-        for (auto &pair : m_columnCheckboxes) {
-            pair.first->setVisible(true);
-        }
+    // 根据搜索文本过滤复选框显示
+    for (const auto &pair : qAsConst(m_columnCheckboxes)) {
+        QCheckBox *checkBox = pair.first;
+        bool matches = text.isEmpty() || checkBox->text().contains(text, Qt::CaseInsensitive);
+        checkBox->setVisible(matches);
+    }
+}
+
+void MainWindow::handleVerticalScroll(int value)
+{
+    // 处理自定义垂直滚动条的值变化
+    if (!m_virtualTableModel) {
         return;
     }
     
-    // 否则，只显示包含搜索文本的复选框
-    QString searchText = text.toLower();
-    for (auto &pair : m_columnCheckboxes) {
-        QString checkboxText = pair.first->text().toLower();
-        bool matches = checkboxText.contains(searchText);
-        pair.first->setVisible(matches);
+    // 记录上次滚动位置，避免重复加载相同数据
+    static int lastStartRow = -1;
+    static int lastRowCount = -1;
+    
+    // 如果滚动位置没有实质性变化，则不进行任何操作
+    if (value == lastStartRow) {
+        return;
     }
+    
+    lastStartRow = value;
+    lastRowCount = qMin(m_visibleRows + 100, m_totalRows - value);
+    
+    // 计算需要加载的数据范围（增加预加载量）
+    int startRow = value;
+    int rowCount = qMin(m_visibleRows + 100, m_totalRows - startRow); // 增加预加载量到100行
+    
+    // 加载指定范围的数据到缓存
+    m_virtualTableModel->loadDataRange(startRow, rowCount);
+    
+    // 使用更高效的刷新方式
+    m_verticalScrollBar->setValue(value);
+    ui->tableView->viewport()->update();
+    
+    // 异步加载更多数据（后台预加载）
+    QMetaObject::invokeMethod(this, [this, value]() {
+        // 加载更大范围的数据用于后台缓存
+        int startRow = qMax(0, value - m_visibleRows);
+        int rowCount = qMin(m_visibleRows * 3, m_totalRows - startRow);
+        m_virtualTableModel->loadDataRange(startRow, rowCount);
+    }, Qt::QueuedConnection);
 }
 
 void MainWindow::resetFilterPanel()

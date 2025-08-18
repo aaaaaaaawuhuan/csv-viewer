@@ -18,7 +18,7 @@ public:
     
     // 支持的文件编码枚举
     enum Encoding {
-        UTF8,    // 默认编码
+        UTF8,    // UTF-8编码
         GBK,     // 中文GBK编码
         AutoDetect  // 自动检测编码
     };
@@ -55,6 +55,14 @@ public:
     int getEstimatedTotalRows() const; // 获取估计的总行数
     bool loadMoreRows(int count); // 加载更多数据行
     int getLastLoadedRowIndex() const; // 获取最后加载的行索引
+    
+    // 大文件优化相关方法
+    qint64 estimateTotalRows(); // 快速估算文件总行数
+    QList<QStringList> getRowsInRange(int startRow, int rowCount); // 获取指定范围的数据
+    
+    // 添加行偏移索引相关方法
+    void buildRowOffsetIndex();
+    bool isRowOffsetIndexBuilt() const;
 
 private:
     // CSV数据存储
@@ -62,6 +70,7 @@ private:
     QList<QStringList> m_dataRows;
     QString m_lastError;
     Encoding m_encoding; // 当前设置的编码
+    QString m_filePath; // 保存文件路径用于后续读取
     
     // 延迟加载相关成员变量
     int m_totalRowCount; // 估计的总行数
@@ -69,6 +78,13 @@ private:
     int m_lastLoadedRow; // 最后加载的行索引
     QString m_fileContentBackup; // 保存文件内容用于后续加载
 
+    // 性能优化相关成员变量
+    bool m_totalRowsEstimated;
+    qint64 m_estimatedTotalRows;
+    
+    // 行偏移索引相关成员变量
+    std::vector<qint64> m_rowOffsets;
+    bool m_rowOffsetIndexBuilt;
 };
 
 #endif // CSVREADER_H

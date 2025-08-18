@@ -10,9 +10,11 @@
 #include <QCheckBox>
 #include <QVector>
 #include <QPair>
+#include <QScrollBar>
 
 #include "CsvReader.h"
 #include "TableModel.h"
+#include "VirtualTableModel.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -47,6 +49,9 @@ private slots:
     
     // 根据输入过滤复选框显示
     void filterCheckboxes(const QString &text);
+    
+    // 处理自定义垂直滚动条的值变化
+    void handleVerticalScroll(int value);
 
 private:
     // 加载CSV文件
@@ -76,10 +81,14 @@ private:
     Ui::MainWindow *ui;
     CsvReader *m_csvReader;
     TableModel *m_tableModel;
+    VirtualTableModel *m_virtualTableModel;
+    QScrollBar *m_verticalScrollBar; // 自定义垂直滚动条
     
     // 性能优化相关成员
     const int DEFAULT_ROWS_LIMIT = 5000; // 默认初始加载行数限制
     int m_currentLoadedRows = 0; // 当前已加载的行数
+    int m_totalRows = 0; // 文件总行数
+    int m_visibleRows = 100; // 可见行数
     
     // 当前打开的文件路径，用于编码变更时重新加载
     QString m_currentFilePath;

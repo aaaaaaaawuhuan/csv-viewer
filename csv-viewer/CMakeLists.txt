@@ -25,6 +25,10 @@ set(PROJECT_SOURCES
         TableModel.h
         CsvReader.cpp
         CsvReader.h
+        DataCache.cpp
+        DataCache.h
+        VirtualTableModel.cpp
+        VirtualTableModel.h
 )
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
